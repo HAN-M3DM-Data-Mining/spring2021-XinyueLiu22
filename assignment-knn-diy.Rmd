@@ -1,5 +1,5 @@
 ---
-title: "Assigment (Xinyue Liu) - kNN DIY"
+title: "Assigment - Xinyue Liu - kNN DIY"
 author:
   - Xinyue Liu - Author
   - Vi Tu - Reviewer
