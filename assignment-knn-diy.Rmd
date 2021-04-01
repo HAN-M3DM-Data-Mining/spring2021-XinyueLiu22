@@ -1,8 +1,8 @@
 ---
-title: "Assigment - kNN DIY"
+title: "Assigment (Xinyue Liu) - kNN DIY"
 author:
-  - name author here - Author
-  - name reviewer here - Reviewer
+  - Xinyue Liu - Author
+  - Vi Tu - Reviewer
 date: "`r format(Sys.time(), '%d %B, %Y')`"
 output:
    html_notebook:
@@ -10,32 +10,143 @@ output:
     toc_depth: 2
 ---
 
-
-```{r}
-library(tidyverse)
-library(googlesheets4)
-library(class)
-library(caret)
-```
-
 ---
 
 Choose a suitable dataset from [this](https://github.com/HAN-M3DM-Data-Mining/assignments/tree/master/datasets) folder and train  your own kNN model. Follow all the steps from the CRISP-DM model.
 
 
+```{r results = "hide"}
+library(tidyverse)
+library(googlesheets4)
+library(class)
+library(caret)
+library(ggplot2)
+library(e1071)
+```
+
 ## Business Understanding
-text and code here
+
+Environmental change is becoming global concern nowadays as it affects human's life unconsciously, climate change is one of the issues. In order to track the climate change and mitigate climate issues, machine learning and intelligence systems can help to track the changes automatically. This would improve efficiency of collecting data and might increase the accuracy of analysis.  
 
 ## Data Understanding
-text and code here
+
+The data I am using here is retrieved from UCI Machine Learning Repository:Occupancy Detection Data Set. It is available online for the public. The values present ground-truth occupancy from time stamped pictures that were taken every minute. 
+
+For convenience the data in CSV format is stored on GitHub. I access it directly using a function dedicated to reading csv from the "readr" package. And using the "str()" function to have some basic information about the dataset. 
+
+```{r}
+library(readr)
+
+url <- "https://raw.githubusercontent.com/HAN-M3DM-Data-Mining/assignments/master/datasets/KNN-occupancy.csv"
+rawDF <- read.csv(url)
+head(rawDF,10)
+
+str(rawDF) 
+```
+
+The dataset has 7 variables (columns) and 8,143 observations (rows).
 
 ## Data Preparation
-text and code here
 
-## Modeling
-text and code here
+The first variable, "date"s do not contain any relevant information for making predictions, so I will delete it from the dataset. 
+
+```{r}
+cleanDF <- rawDF[-1]
+head(cleanDF)
+```
+
+The variable named "Occupancy" contains the outcomes I would like to predict - "0" for "No", and "1" for "Yes". The variable I would like to predict is called the "label". We can look at the counts and proportions for both outcomes, using the "tables()" and "prop.tables()" functions.
+
+```{r}
+cntOccu <- table(cleanDF$Occupancy)
+propOccu <- round(prop.table(cntOccu) * 100 , digits = 1)
+
+cntOccu
+propOccu
+```
+
+The variable is now coded as a type character. Many models require that the "label" is of type factor. This is easily solved using the "factor()" function.
+
+The features consist of three different measurements of 5 characteristics. We will take 3 characteristics and have a closer look.
+
+```{r}
+library(tidyverse)
+library(dbplyr)
+
+cleanDF$Occupancy <- factor(cleanDF$Occupancy, levels = c("0", "1"), labels = c("No", "Yes")) %>% relevel("Yes")
+head(cleanDF,10)
+
+summary(cleanDF[c("Temperature", "Humidity", "Light")])
+```
+
+I notice that the 3 variables have very different ranges and as a consequence "Light" will have a larger impact on the distance calculation than the "Temperature". This could potentially cause problems for modeling. To solve this I apply normalization to re-scale all features to a standard range of values.
+
+```{r}
+normalize <- function(x) { # Function takes in a vector
+  return ((x - min(x)) / (max(x) - min(x))) # distance of item value - minimum vector value divided by the range of all vector values
+}
+
+testSet1 <- c(1:5)
+testSet2 <- c(1:5) * 10
+
+cat("testSet1:", testSet1, "\n")
+
+cat("testSet2:", testSet2, "\n")
+
+cat("Normalized testSet1:", normalize(testSet1), "\n")
+
+cat("Normalized testSet2:", normalize(testSet2))
+```
+
+I apply the "normalize()" function to each feature in the dataset (so, not on the label) using the "sapply()" function.
+
+```{r}
+summary(cleanDF)
+
+nCols <- dim(cleanDF)[2]
+
+
+cleanDF_n <- sapply(2:nCols-1,
+                    function(x) {
+  normalize(cleanDF[,x])
+}) %>% as.data.frame()
+head(cleanDF_n)
+names(cleanDF_n) <- c("Temperature", "Humidity", "Light","CO2","HumidityRatio")
+
+summary(cleanDF_n[c("Temperature", "Humidity", "Light","CO2","HumidityRatio")])
+```
+
+I now split the data into training and test sets. 
+
+```{r}
+trainDF_feat <- cleanDF_n[1:7000,]
+testDF_feat <- cleanDF_n[7001:8143,]
+
+trainDF_labels <- as.data.frame(cleanDF[1:7000,  6])
+testDF_labels <- as.data.frame(cleanDF[7001:8143,  6])
+```
+
+
 
 ## Evaluation and Deployment
-text and code here
+
+To train the knn model I only need one single function from the "class" package. It takes the set with training features and the set with training label. The trained model is applied to the set with test features and the function gives back a set of predictions.
+And for the K value, it is appropriate to be the square root value of the observation numbers (8,143), so the root is around 90, but K value should be an odd number, so I choose 91 here. 
+
+```{r}
+cleanDF_test_pred <- knn(train = as.matrix(trainDF_feat), test = as.matrix(testDF_feat), 
+                         cl = as.matrix(trainDF_labels), k = 91)
+head(cleanDF_test_pred,10)
+```
+
+```{r}
+confusionMatrix(cleanDF_test_pred, testDF_labels[[1]], positive = "Yes", dnn = c("Prediction", "True"))
+```
+
+References: 
+
+Luis Candanedo, luismiguel.candanedoibarra '@' umons.ac.be, UMONS.
+
+Accurate occupancy detection of an office room from light, temperature, humidity and CO2 measurements using statistical learning models. Luis M. Candanedo, VÃ©ronique Feldheim. Energy and Buildings. Volume 112, 15 January 2016, Pages 28-39.
 
 reviewer adds suggestions for improving the model
