@@ -1,0 +1,140 @@
+---
+title: "Assigment - Naive Bayes DIY"
+author:
+  - Qiwen Chen - Author
+  - Xinyue Liu - Reviewer
+date: "`r format(Sys.time(), '%d %B, %Y')`"
+output:
+    html_notebook:
+    toc: true
+    toc_depth: 2
+---
+
+```{r message=TRUE, warning=TRUE, include=FALSE}
+library(tidyverse)
+library(tm)
+library(caret)
+library(wordcloud)
+library(e1071)
+library(readr)
+```
+
+---
+
+## Business Understanding
+In 2017, the Pew Research Center indicated that "roughly 4/10 Americans have personally experienced online harassment". This illustrates the importance of detecting online hate speech. Naives Bayes techniques can be used to detect hate speech to further intervene the conversations.
+
+## Data Understanding
+The data that I will use comes from the Reddit Hate Speech Collection. It contains a set of Reddit conversations that are manually labeled as hate or non-hate speech with intervention responses by Mechanical Turk workers.
+In the following, the dataset is read, and I find out there is not needed data, so I remove column 1 and 4.
+```{r}
+url <- "https://raw.githubusercontent.com/HAN-M3DM-Data-Mining/assignments/master/datasets/NB-reddit-hate-speech.csv"
+hatespeech <- read_csv(url)
+rawDF <- hatespeech[c(3,2)]
+head(rawDF)
+```
+The dataset has 2 variables (columns) and 5020 observations (rows).
+
+The variable "hate_speech_idx" is of class "character". As it indicates whether the message belongs to the category "normal" or "hateful" we should convert it to a factor variable.
+```{r}
+rawDF$hate_speech_idx <- ifelse(rawDF$hate_speech_idx == "n/a", "normal", "hateful")#This is the improvement. The error exists when the data are not categorized into "normal" and "hateful". 
+rawDF$type <- rawDF$hate_speech_idx %>% factor %>% relevel("hateful")
+class(rawDF$type)
+```
+
+Then I visually inspect the data by creating wordclouds for each category.
+```{r}
+hateful <- rawDF %>% filter(hate_speech_idx == "hateful")
+normal <- rawDF %>% filter(hate_speech_idx == "normal")#This is the improvement. The original version is: hateful <- rawDF %>% filter(hate_speech_idx ！= "n/a") normal <- rawDF %>% filter(hate_speech_idx == "n/a") Here I replaced "hateful" and "normal" by "n/a", these two variables are meaningful. 
+
+wordcloud(hateful$text, max.words = 25, scale = c(4, 0.8), colors= c("indianred1","indianred2","indianred3","indianred"))
+wordcloud(normal$text, max.words = 25, scale = c(4, 0.8), colors= c("lightsteelblue1","lightsteelblue2","lightsteelblue3","lightsteelblue"))
+```
+There is quite some differences between the normal and hateful coversation.
+
+## Data Preparation
+In Data Preparation, I create a corpus to refer to a collection of text documents.
+```{r}
+rawCorpus <- Corpus(VectorSource(rawDF$text))
+inspect(rawCorpus[1:3])
+```
+The corpus contains 5020 documents, which obviously matches with the number of rows in our dataset.
+
+I will use the function tm_map() to do some first cleaning up. In this case, I change everything to lowerccase and remove the numbers, stopwords, and punctuation as these are not meaningful in detecting the speech hateful or not. 
+```{r}
+cleanCorpus <- rawCorpus %>% tm_map(tolower) %>% tm_map(removeNumbers)
+
+cleanCorpus <- cleanCorpus %>% tm_map(tolower) %>% tm_map(removeWords, stopwords()) %>% tm_map(removePunctuation)
+```
+
+As I have removed a lot of items in the previous steps, there is a lot of space left in blank, so I remove these white space too.
+Then I inspect the corpus with comparison to the raw version.
+```{r}
+cleanCorpus <- cleanCorpus %>% tm_map(stripWhitespace)
+
+tibble(Raw = rawCorpus$content[1:3], Clean = cleanCorpus$content[1:3])
+```
+
+After cleaning the texts, I have transformed the conversations to a matrix.
+```{r}
+cleanDTM <- cleanCorpus %>% DocumentTermMatrix
+inspect(cleanDTM)
+```
+
+Before I can start with modeling, I need to split the datasets into train and test sets. 
+```{r}
+set.seed(1234)
+trainIndex <- createDataPartition(rawDF$type, p = .75, 
+                                  list = FALSE, 
+                                  times = 1)
+head(trainIndex)
+
+# Apply split indices to DF
+trainDF <- rawDF[trainIndex, ]
+testDF <- rawDF[-trainIndex, ]
+
+# Apply split indices to Corpus
+trainCorpus <- cleanCorpus[trainIndex]
+testCorpus <- cleanCorpus[-trainIndex]
+
+# Apply split indices to DTM
+trainDTM <- cleanDTM[trainIndex, ]
+testDTM <- cleanDTM[-trainIndex, ]
+```
+
+As we can check the DTM has almost 36543 words that's a lot, so I will eliminate the words with low frequencies to save time.
+```{r}
+freqWords <- trainDTM %>% findFreqTerms(10)
+trainDTM <-  DocumentTermMatrix(trainCorpus, list(dictionary = freqWords))
+testDTM <-  DocumentTermMatrix(testCorpus, list(dictionary = freqWords))
+```
+I am able to reduce the number to around 5000.
+I will transform the numerical matrix of word counts into a factor that simply indicates whether the word appears in the document or not.
+```{r}
+convert_counts <- function(x) {
+  x <- ifelse(x > 0, 1, 0) %>% factor(levels = c(0,1), labels = c("No", "Yes"))
+}
+
+nColsDTM <- dim(trainDTM)[2]
+trainDTM <- apply(trainDTM, MARGIN = 2, convert_counts)
+testDTM <- apply(testDTM, MARGIN = 2, convert_counts)
+
+head(trainDTM[,1:10])
+```
+
+## Modeling
+Now, I have everything in place to start training the model and evaluate against the test dataset. Finally, I can analyze the performance of the model with a confusion matrix.
+```{r}
+nbayesModel <-  naiveBayes(trainDTM, trainDF$type, laplace = 1)
+
+predVec <- predict(nbayesModel, testDTM)
+confusionMatrix(predVec, testDF$type, positive = "hateful", dnn = c("Prediction", "True"))
+```
+
+
+## Evaluation and Deployment
+
+I have correct some errors to make this model more predictive. Accuracy is a good matrix to evaluate the model. In this case, accuracy achieved 0.6643, which is not particularly high, but the model is feasible enough. However, I suggest to use new data set to evaluate this model, so that can prevent likelihood of over-fitting to the data set. 
+
+## References
+“A Benchmark Dataset for Learning to Intervene in Online Hate Speech” 2019, Oct 3. Github. Accessed March 18, 2021. https://github.com/jing-qian/A-Benchmark-Dataset-for-Learning-to-Intervene-in-Online-Hate-Speech.
